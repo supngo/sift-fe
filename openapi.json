@@ -1,0 +1,462 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Project Sift API",
+    "description": "Upload opaque binary payloads; a background worker finds the JSON embedded in each one and records its keys. Flow: `POST /v1/batches` (202 + `batchId`), then poll `GET /v1/batches/{batchId}` until `status` is `completed`.\n\nErrors are RFC 7807 problem details with a stable `code` property; branch on `code`, not on the message.",
+    "version": "0.1.0-SNAPSHOT"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Batches",
+      "description": "Upload binary payloads and read the keys extracted from them"
+    }
+  ],
+  "paths": {
+    "/v1/batches": {
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Recent batches",
+        "description": "Newest first, with per-status payload counts. Keys are not included; fetch `GET /v1/batches/{batchId}` for those.",
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many batches to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The batches",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_PARAMETER`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Upload payloads",
+        "description": "The `Content-Type` header says how the body is laid out:\n\n* `application/octet-stream`: the whole body is **one** payload.\n* `application/x-sift-batch`: **several** payloads in the batch envelope. All integers are big-endian unsigned: `version` (1 byte, = 1), `count` (4 bytes), then `count` x (`length` (4 bytes) + `length` bytes of payload). `java scripts/MakeFrame.java` builds one.\n\nReturns `202` immediately; extraction runs in the background. Poll `GET /v1/batches/{batchId}`.",
+        "operationId": "uploadSingle",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "One raw payload"
+              }
+            },
+            "application/x-sift-batch": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Batch envelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Saved; extraction will run in the background",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedBatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed upload: `TRUNCATED_FRAME`, `TRAILING_BYTES`, `UNSUPPORTED_FRAME_VERSION`, `EMPTY_PAYLOAD`, `EMPTY_UPLOAD`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over a limit: `PAYLOAD_TOO_LARGE`, `BATCH_TOO_LARGE`, `TOO_MANY_PAYLOADS`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Content-Type is neither of the two upload formats",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/batches/{batchId}": {
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Batch status and extracted keys",
+        "description": "Poll until `status` is `completed`. Each payload's `keys` are the distinct key names across all JSON documents found in it; `documents` has every key's full path (`/warehouse/zone`, array elements as `*`).",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "batchId",
+            "in": "path",
+            "description": "As returned by the upload",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "b_1a2b3c4d5e6f"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The batch",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BATCH_NOT_FOUND`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcceptedBatch": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "example": "b_1a2b3c4d5e6f"
+          },
+          "payloadCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Payloads saved in this batch"
+          }
+        },
+        "required": [
+          "batchId",
+          "payloadCount"
+        ]
+      },
+      "ProblemDetail": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string",
+            "format": "uri"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
+      },
+      "BatchList": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of items returned (at most `limit`)"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchSummary"
+            }
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ]
+      },
+      "BatchSummary": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "example": "b_1a2b3c4d5e6f"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "busy",
+              "completed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payloadCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "done": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Payloads extracted successfully"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Payloads that failed for good"
+          },
+          "inProgress": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Payloads still pending or processing"
+          }
+        },
+        "required": [
+          "batchId",
+          "createdAt",
+          "done",
+          "failed",
+          "inProgress",
+          "payloadCount",
+          "status"
+        ]
+      },
+      "BatchResult": {
+        "type": "object",
+        "properties": {
+          "batchId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "busy",
+              "completed"
+            ]
+          },
+          "payloadCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "extracts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayloadExtract"
+            }
+          }
+        },
+        "required": [
+          "batchId",
+          "extracts",
+          "payloadCount",
+          "status"
+        ]
+      },
+      "DocumentExtract": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Byte offset of the opening brace"
+          },
+          "end": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Byte offset just past the closing brace"
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "The payload ended before the object closed"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeyPath"
+            }
+          }
+        },
+        "required": [
+          "end",
+          "keys",
+          "partial",
+          "start"
+        ]
+      },
+      "ExtractError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "EXTRACTION_ERROR"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "KeyPath": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "example": "/warehouse/zone"
+          },
+          "name": {
+            "type": "string",
+            "example": "zone"
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1 = member of the outermost object",
+            "example": 2
+          }
+        },
+        "required": [
+          "depth",
+          "name",
+          "path"
+        ]
+      },
+      "PayloadExtract": {
+        "type": "object",
+        "properties": {
+          "payloadIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "done",
+              "failed"
+            ]
+          },
+          "keys": {
+            "type": "array",
+            "example": [
+              "sku",
+              "qty",
+              "warehouse",
+              "zone"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentExtract"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "e.g. SCAN_BUDGET_EXCEEDED, DEPTH_LIMIT_EXCEEDED, KEY_TRUNCATED, PATH_TRUNCATED, TOO_MANY_KEYS",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtractError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "documents",
+          "error",
+          "keys",
+          "payloadIndex",
+          "status",
+          "warnings"
+        ]
+      }
+    }
+  }
+}
