@@ -6,6 +6,12 @@ payload. The backend lives in a separate project (Spring Boot, `https://github.c
 ## Requirements
 1. Node 24
 2. Any browser
+3. 
+## AI Helps
+This application is aided by `Claude code`.
+1. Built all the apis
+2. Built all the components
+3. Built all the pages
 
 ## Run it
 
