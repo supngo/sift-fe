@@ -1,7 +1,11 @@
 # Sift Dashboard
 
 React UI for Project Sift: upload binary payloads, watch batches complete, browse the JSON keys extracted from each
-payload. The backend lives in a separate project (Spring Boot, `sift-step1`).
+payload. The backend lives in a separate project (Spring Boot, `https://github.com/supngo/sift-be`).
+
+## Requirements
+1. Node 24
+2. Any browser
 
 ## Run it
 
